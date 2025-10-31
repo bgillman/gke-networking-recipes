@@ -15,6 +15,23 @@ To achieve this, we will:
 - [Deploying Gateways](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways)
 - [Proxy-only subnets for internal HTTP(S) load balancers](https://cloud.google.com/load-balancing/docs/l7-internal/proxy-only-subnets)
 
+### Gateway API v1 Migration Notes
+
+This recipe has been updated to use the stable Gateway API v1 specification. Key changes from earlier versions:
+
+#### API Version Updates
+- **Gateway**: `networking.x-k8s.io/v1alpha1` → `gateway.networking.k8s.io/v1`
+- **HTTPRoute**: `networking.x-k8s.io/v1alpha1` → `gateway.networking.k8s.io/v1`
+
+#### HTTPRoute Field Changes
+- **Backend References**: `forwardTo` → `backendRefs`
+- **Service Name**: `serviceName` → `name`
+
+#### Gateway API CRD Version
+- Updated from `v0.3.0` to `v1.2.0` for stable v1 API support
+
+If you're migrating from an older version, ensure your GKE cluster supports Gateway API v1 (available in GKE 1.24+).
+
 ## Setup
 
 Set the project environment variable and gcloud configuration
@@ -29,14 +46,36 @@ $ gcloud services enable \
      container.googleapis.com 
 ```
 
-Beware to [create a proxy-only subnet](https://cloud.google.com/load-balancing/docs/l7-internal/proxy-only-subnets#proxy_only_subnet_create) in the same region of the cluster you're going to create
-```
-gcloud compute networks subnets create SUBNET_NAME \
-    --purpose=INTERNAL_HTTPS_LOAD_BALANCER \
+Create a [proxy-only subnet](https://cloud.google.com/load-balancing/docs/proxy-only-subnets) in the same region as your GKE cluster. This subnet is required for the internal HTTP(S) Load Balancer to function properly.
+
+**Important**: You must create the proxy-only subnet before deploying the Gateway resources.
+
+```bash
+gcloud compute networks subnets create proxy-only-subnet \
+    --purpose=REGIONAL_MANAGED_PROXY \
     --role=ACTIVE \
     --region=REGION \
     --network=VPC_NETWORK_NAME \
-    --range=CIDR_RANGE
+    --range=10.129.0.0/23
+```
+
+**Proxy-only Subnet Requirements (2024-2025 Updates)**:
+- Use `--purpose=REGIONAL_MANAGED_PROXY` for regional internal load balancers
+- Minimum subnet size: `/26` (64 IP addresses)  
+- Recommended size: `/23` (512 IP addresses) for better scalability
+- Create one proxy-only subnet per region in your VPC network
+- Ensure firewall rules allow traffic from the proxy-only subnet to your backend services
+
+**Firewall Configuration**: If using a custom VPC network, create a firewall rule to allow health checks:
+```bash
+gcloud compute firewall-rules create allow-proxy-only-subnet \
+    --direction=INGRESS \
+    --priority=1000 \
+    --network=VPC_NETWORK_NAME \
+    --action=ALLOW \
+    --rules=tcp:80,tcp:443,tcp:8080 \
+    --source-ranges=10.129.0.0/23 \
+    --target-tags=gke-node
 ```
 
 [Create one GKE cluster](https://github.com/GoogleCloudPlatform/gke-networking-recipes/blob/master/cluster-setup.md#single-cluster-environment) if one is not running yet.
@@ -147,8 +186,10 @@ $ kubectl apply -f app-v2.yaml
 ```
 
 Now enable the [Gateway API Custom Resource Definitions (CRDs)](https://cloud.google.com/kubernetes-engine/docs/how-to/deploying-gateways#install_gateway_api_crds)
+
+**Note**: This command has been updated to use Gateway API v1.2.0 which includes stable v1 API support:
 ```
-kubectl kustomize "github.com/kubernetes-sigs/gateway-api/config/crd?ref=v0.3.0" | kubectl apply -f -
+kubectl kustomize "github.com/kubernetes-sigs/gateway-api/config/crd?ref=v1.2.0" | kubectl apply -f -
 ```
 
 Check that presence of the Gateway classes, gke-l7-gxlb and gke-l7-rilb should be available and listed:
@@ -166,7 +207,7 @@ Deploy the resources for the Single-cluster Gateway. This includes a Gateway uti
 $ cat gateway.yaml
 
 kind: Gateway
-apiVersion: networking.x-k8s.io/v1alpha1
+apiVersion: gateway.networking.k8s.io/v1
 metadata:
   name: single-cluster-gateway-rilb
   namespace: store
@@ -188,7 +229,7 @@ Deploy the `store-route-ilb` HTTPRoute resource to the config cluster.
 $ cat route.yaml
 
 kind: HTTPRoute
-apiVersion: networking.x-k8s.io/v1alpha1
+apiVersion: gateway.networking.k8s.io/v1
 metadata:
   name: store-route-ilb
   namespace: store
@@ -198,16 +239,18 @@ spec:
   hostnames:
   - "store.example.internal"
   rules:
-  - forwardTo:
-    - serviceName: store-v1
+  - backendRefs:
+    - name: store-v1
       port: 8080
       weight: 50
-    - serviceName: store-v2
+    - name: store-v2
       port: 8080
       weight: 50
 ```
 
-This HTTPRoute will allow users to take advantage of features in the `gke-l7-rilb ` GatewayClass like traffic weighting. In this scenario, we specify the `weight` fields in the HTTPRoute to send 50% of traffic to the application version `store-v1` and 50% of traffic to the application version `store-v2`.
+This HTTPRoute will allow users to take advantage of features in the `gke-l7-rilb ` GatewayClass like traffic weighting. In this scenario, we specify the `weight` fields in the `backendRefs` to send 50% of traffic to the application version `store-v1` and 50% of traffic to the application version `store-v2`.
+
+**Note**: This HTTPRoute uses the updated Gateway API v1 specification with `backendRefs` instead of the deprecated `forwardTo` field.
 
 /////
 ## Validate successful deployment of an internal Single-cluster Gateway
