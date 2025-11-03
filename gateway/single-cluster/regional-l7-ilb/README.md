@@ -193,9 +193,22 @@ kubectl kustomize "github.com/kubernetes-sigs/gateway-api/config/crd?ref=v1.2.0"
 ```
 
 Check that presence of the Gateway classes, gke-l7-gxlb and gke-l7-rilb should be available and listed:
+
 ```
 kubectl get gatewayclass
 ```
+| NAME | CONTROLLER | ACCEPTED |
+|---|---|---|
+| gke-l7-global-external-managed | networking.gke.io/gateway | True |
+| gke-l7-gxlb | networking.gke.io/gateway | True |
+| gke-l7-regional-external-managed | networking.gke.io/gateway | True |
+| gke-l7-rilb | networking.gke.io/gateway | True |
+| gke-passthrough-lb-external-managed | networking.gke.io/persistent-ip-controller | True |
+| gke-passthrough-lb-internal-managed | networking.gke.io/persistent-ip-controller | True |
+| gke-persistent-fast-regional-external-managed | networking.gke.io/persistent-ip-controller | True |
+| gke-persistent-fast-regional-internal-managed | networking.gke.io/persistent-ip-controller | True |
+| gke-persistent-regional-external-managed | networking.gke.io/persistent-ip-controller | True |
+| gke-persistent-regional-internal-managed | networking.gke.io/persistent-ip-controller | True |
 
 ## Deploy the Gateway and HTTPRoute
 
@@ -204,48 +217,13 @@ Once the applications have been deployed, we can then configure an internal Gate
 Deploy the resources for the Single-cluster Gateway. This includes a Gateway utilizing the `gke-l7-rilb` GatewayClass and selecting on HTTPRoutes with the label `gateway: single-cluster-gateway-rilb`.
 
 ```
-$ cat gateway.yaml
-
-kind: Gateway
-apiVersion: gateway.networking.k8s.io/v1
-metadata:
-  name: single-cluster-gateway-rilb
-  namespace: store
-spec:
-  gatewayClassName: gke-l7-rilb
-  listeners:  
-  - protocol: HTTP
-    port: 80
-    routes:
-      kind: HTTPRoute
-      selector:
-        matchLabels:
-          gateway: single-cluster-gateway-rilb
+kubectl apply -f gateway.yaml
 ```
 
-Deploy the `store-route-ilb` HTTPRoute resource to the config cluster. 
+Deploy the `store` HTTPRoute resource to the config cluster. 
 
 ```
-$ cat route.yaml
-
-kind: HTTPRoute
-apiVersion: gateway.networking.k8s.io/v1
-metadata:
-  name: store-route-ilb
-  namespace: store
-  labels:
-    gateway: single-cluster-gateway-rilb
-spec:
-  hostnames:
-  - "store.example.internal"
-  rules:
-  - backendRefs:
-    - name: store-v1
-      port: 8080
-      weight: 50
-    - name: store-v2
-      port: 8080
-      weight: 50
+ kubectl apply -f route.yaml 
 ```
 
 This HTTPRoute will allow users to take advantage of features in the `gke-l7-rilb ` GatewayClass like traffic weighting. In this scenario, we specify the `weight` fields in the `backendRefs` to send 50% of traffic to the application version `store-v1` and 50% of traffic to the application version `store-v2`.
@@ -265,7 +243,7 @@ $ gcloud compute instances create client-host \
 --tags=allow-ssh,http-server,https-server
 ```
 
-Grab the internal IP address for the Single-cluster Gateway.
+Get the Internal IP address for the Single-cluster Gateway.
 
 ```
 $ kubectl -n store get gateway single-cluster-gateway-rilb -o=jsonpath="{.status.addresses[0].value}"
@@ -273,7 +251,7 @@ $ kubectl -n store get gateway single-cluster-gateway-rilb -o=jsonpath="{.status
 
 SSH into the client VM. 
 ```
-$ gcloud beta compute ssh client-host --zone=europe-west2-a
+$ gcloud beta compute ssh client-host --zone=$ZONE
 ```
 
 Confirm that as we issue requests to the Single-cluster Regional L7 Internal Balancer with traffic weighting configured; we are seeing half traffic requests served from application `store-v1` and half requests being served from application with metadata `store-v2`.

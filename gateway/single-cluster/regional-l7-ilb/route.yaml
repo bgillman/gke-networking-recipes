@@ -6,10 +6,23 @@ metadata:
   labels:
     gateway: single-cluster-gateway-rilb
 spec:
+  # 1. Hostname is correct (matches your curl request)
   hostnames:
-  - "store.example.internal"
+  - "internal.bgillman.demo.altostrat.com"
+  
+  # The parentRefs field is assumed to be defined by the GKE controller 
+  # based on the Gateway's listeners, but for clarity, it should look like this:
+  parentRefs:
+  - name: single-cluster-gateway-rilb
+    namespace: store # Explicitly link to your Gateway
+    sectionName: http # Link to the specific listener (named 'http' in our previous fix)
+
   rules:
-  - backendRefs:
+  - matches:
+    - path:
+        type: PathPrefix 
+        value: "/"       
+    backendRefs:
     - name: store-v1
       port: 8080
       weight: 50
