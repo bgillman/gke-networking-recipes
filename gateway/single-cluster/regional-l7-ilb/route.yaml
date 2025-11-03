@@ -8,7 +8,7 @@ metadata:
 spec:
   # 1. Hostname is correct (matches your curl request)
   hostnames:
-  - "internal.bgillman.demo.altostrat.com"
+  - "store.example.internal"
   
   # The parentRefs field is assumed to be defined by the GKE controller 
   # based on the Gateway's listeners, but for clarity, it should look like this:
